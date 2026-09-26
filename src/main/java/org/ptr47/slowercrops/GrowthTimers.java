@@ -2,6 +2,7 @@ package org.ptr47.slowercrops;
 
 import java.util.HashMap;
 import java.util.Map;
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -24,7 +25,9 @@ import net.minecraft.world.level.block.state.properties.IntegerProperty;
 import net.minecraft.world.level.saveddata.SavedData;
 import org.jetbrains.annotations.NotNull;
 
-/** Per-position, persistent growth clocks. Time only accumulates while the plant is eligible to grow. */
+/**
+ * Per-position, persistent growth clocks. Time only accumulates while the plant is eligible to grow.
+ */
 public final class GrowthTimers extends SavedData {
     private static final String DATA_NAME = "slowercrops_growth_timers";
     private final Map<Long, Timer> timers = new HashMap<>();
@@ -74,6 +77,46 @@ public final class GrowthTimers extends SavedData {
                 || block instanceof NetherWartBlock
                 || block instanceof PitcherCropBlock
                 || block instanceof CocoaBlock;
+    }
+
+    public static boolean hasRemainingGrowth(BlockState state) {
+        if (state.getBlock() instanceof SaplingBlock) {
+            return state.getValue(SaplingBlock.STAGE) < 2;
+        }
+        IntegerProperty ageProperty = getAgeProperty(state);
+        return ageProperty != null
+                && state.getValue(ageProperty) < ageProperty.getPossibleValues().stream()
+                .mapToInt(Integer::intValue).max().orElse(state.getValue(ageProperty));
+    }
+
+    /**
+     * Returns an ideal-conditions estimate for reaching maturity, or {@code null} if the
+     * block is not a supported immature crop or sapling.
+     */
+    public GrowthEstimate estimate(ServerLevel level, BlockPos pos, BlockState state) {
+        if (!hasRemainingGrowth(state)) {
+            return null;
+        }
+
+        boolean sapling = state.getBlock() instanceof SaplingBlock;
+        String blockId = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+        int age = sapling ? state.getValue(SaplingBlock.STAGE) : state.getValue(getAgeProperty(state));
+        Timer timer = timers.get(pos.asLong());
+        long elapsed = 0;
+        if (timer != null && timer.block.equals(blockId) && timer.age == age) {
+            // Treat time since the last random-tick opportunity as favorable growth time.
+            elapsed = timer.elapsed + Math.max(0L, level.getGameTime() - timer.last);
+        }
+
+        int minDays = sapling ? Config.TREE_MIN_DAYS.get() : Config.CROP_MIN_DAYS.get();
+        int maxDays = sapling ? Config.TREE_MAX_DAYS.get() : Config.CROP_MAX_DAYS.get();
+        maxDays = Math.max(minDays, maxDays);
+        return new GrowthEstimate(
+                Math.max(0L, minDays * 24000L - elapsed),
+                Math.max(0L, maxDays * 24000L - elapsed));
+    }
+
+    public record GrowthEstimate(long minimumTicks, long maximumTicks) {
     }
 
     /** Handles a crop or sapling at one of its ordinary random-tick opportunities. */
