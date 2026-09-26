@@ -65,14 +65,20 @@ public final class SlowerCropsJadePlugin implements IWailaPlugin {
 
         @Override
         public void appendTooltip(ITooltip tooltip, BlockAccessor accessor, IPluginConfig config) {
+            if (!GrowthTimers.hasRemainingGrowth(accessor.getBlockState())) {
+                return;
+            }
             var data = accessor.getServerData();
             if (!data.contains(MINIMUM_TICKS) || !data.contains(MAXIMUM_TICKS)) {
                 return;
             }
             long minimumDays = daysRoundedUp(data.getLong(MINIMUM_TICKS));
             long maximumDays = daysRoundedUp(data.getLong(MAXIMUM_TICKS));
-            tooltip.add(Component.translatable(
-                    "jade.slowercrops.growth_time_range", boldDays(minimumDays), boldDays(maximumDays)));
+            Component estimate = minimumDays == maximumDays
+                    ? Component.translatable("jade.slowercrops.growth_time_single", boldDays(minimumDays))
+                    : Component.translatable(
+                            "jade.slowercrops.growth_time_range", boldDays(minimumDays), boldDays(maximumDays));
+            tooltip.add(estimate);
         }
     }
 

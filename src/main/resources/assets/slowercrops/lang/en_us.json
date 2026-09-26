@@ -1,4 +1,5 @@
 {
   "config.jade.plugin_slowercrops.growth_time": "Growth time estimate",
+  "jade.slowercrops.growth_time_single": "Growth: ~%s days",
   "jade.slowercrops.growth_time_range": "Growth: ~%s–%s days"
 }

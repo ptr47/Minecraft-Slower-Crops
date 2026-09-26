@@ -100,20 +100,28 @@ public final class GrowthTimers extends SavedData {
 
         boolean sapling = state.getBlock() instanceof SaplingBlock;
         String blockId = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
-        int age = sapling ? state.getValue(SaplingBlock.STAGE) : state.getValue(getAgeProperty(state));
+        IntegerProperty ageProperty = sapling ? null : getAgeProperty(state);
+        int age = sapling ? state.getValue(SaplingBlock.STAGE) : state.getValue(ageProperty);
+        int maxAge = sapling ? 2 : ageProperty.getPossibleValues().stream()
+                .mapToInt(Integer::intValue).max().orElse(age);
+
+        long remainingNumerator = maxAge - age;
+        long remainingDenominator = maxAge;
         Timer timer = timers.get(pos.asLong());
-        long elapsed = 0;
-        if (timer != null && timer.block.equals(blockId) && timer.age == age) {
+        if (timer != null && timer.block.equals(blockId) && age >= timer.age) {
             // Treat time since the last random-tick opportunity as favorable growth time.
-            elapsed = timer.elapsed + Math.max(0L, level.getGameTime() - timer.last);
+            long elapsed = Math.max(timer.elapsed, timer.duration * age / maxAge)
+                    + Math.max(0L, level.getGameTime() - timer.last);
+            remainingNumerator = Math.max(0L, timer.duration - elapsed);
+            remainingDenominator = timer.duration;
         }
 
         int minDays = sapling ? Config.TREE_MIN_DAYS.get() : Config.CROP_MIN_DAYS.get();
         int maxDays = sapling ? Config.TREE_MAX_DAYS.get() : Config.CROP_MAX_DAYS.get();
         maxDays = Math.max(minDays, maxDays);
         return new GrowthEstimate(
-                Math.max(0L, minDays * 24000L - elapsed),
-                Math.max(0L, maxDays * 24000L - elapsed));
+                scaleRemaining(minDays * 24000L, remainingNumerator, remainingDenominator),
+                scaleRemaining(maxDays * 24000L, remainingNumerator, remainingDenominator));
     }
 
     public record GrowthEstimate(long minimumTicks, long maximumTicks) {
@@ -141,12 +149,29 @@ public final class GrowthTimers extends SavedData {
 
         long now = level.getGameTime();
         Timer timer = timers.get(key);
-        if (timer == null || !timer.block.equals(blockId) || timer.age != age) {
-            timer = createTimer(pos, blockId, age, now, sapling);
+        if (timer == null || !timer.block.equals(blockId)) {
+            timer = createTimer(pos, blockId, age, maxAge, now, sapling);
             timers.put(key, timer);
             setDirty();
             return;
         }
+        if (timer.age != age) {
+            if (age > timer.age) {
+                // Preserve elapsed time when bone meal or another effect advances the crop.
+                timer.age = age;
+                timer.elapsed = Math.max(timer.elapsed, timer.duration * age / maxAge);
+                timer.last = now;
+                setDirty();
+            } else {
+                timer = createTimer(pos, blockId, age, maxAge, now, sapling);
+                timers.put(key, timer);
+                setDirty();
+                return;
+            }
+        }
+
+        // Account for plants that were already part-grown before their timer was created.
+        timer.elapsed = Math.max(timer.elapsed, timer.duration * age / maxAge);
 
         // A position receives random ticks at irregular intervals. Credit all elapsed
         // in-game time, including periods when its chunk was unloaded.
@@ -181,13 +206,23 @@ public final class GrowthTimers extends SavedData {
         setDirty();
     }
 
-    private static Timer createTimer(BlockPos pos, String block, int age, long now, boolean sapling) {
+    private static Timer createTimer(
+            BlockPos pos, String block, int age, int maxAge, long now, boolean sapling) {
         int minDays = sapling ? Config.TREE_MIN_DAYS.get() : Config.CROP_MIN_DAYS.get();
         int maxDays = sapling ? Config.TREE_MAX_DAYS.get() : Config.CROP_MAX_DAYS.get();
         maxDays = Math.max(minDays, maxDays);
         long range = (long) (maxDays - minDays) * 24000L;
         long offset = range == 0 ? 0 : Math.floorMod(mix(pos.asLong()), range + 1);
-        return new Timer(block, age, 0, now, minDays * 24000L + offset);
+        long duration = minDays * 24000L + offset;
+        long elapsed = duration * age / maxAge;
+        return new Timer(block, age, elapsed, now, duration);
+    }
+
+    private static long scaleRemaining(long duration, long remaining, long total) {
+        if (remaining <= 0) {
+            return 0;
+        }
+        return (duration * remaining + total - 1) / total;
     }
 
     private static IntegerProperty getAgeProperty(BlockState state) {
