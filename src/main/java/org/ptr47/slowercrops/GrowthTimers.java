@@ -1,5 +1,7 @@
 package org.ptr47.slowercrops;
 
+import java.util.HashMap;
+import java.util.Map;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -9,14 +11,18 @@ import net.minecraft.nbt.Tag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.RandomSource;
 import net.minecraft.util.datafix.DataFixTypes;
-import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.CocoaBlock;
+import net.minecraft.world.level.block.CropBlock;
+import net.minecraft.world.level.block.FarmBlock;
+import net.minecraft.world.level.block.NetherWartBlock;
+import net.minecraft.world.level.block.PitcherCropBlock;
+import net.minecraft.world.level.block.SaplingBlock;
+import net.minecraft.world.level.block.StemBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.IntegerProperty;
 import net.minecraft.world.level.saveddata.SavedData;
 import org.jetbrains.annotations.NotNull;
-
-import java.util.HashMap;
-import java.util.Map;
 
 /** Per-position, persistent growth clocks. Time only accumulates while the plant is eligible to grow. */
 public final class GrowthTimers extends SavedData {
@@ -60,6 +66,16 @@ public final class GrowthTimers extends SavedData {
         return tag;
     }
 
+    public static boolean isManagedGrowthBlock(BlockState state) {
+        var block = state.getBlock();
+        return block instanceof SaplingBlock
+                || block instanceof CropBlock
+                || block instanceof StemBlock
+                || block instanceof NetherWartBlock
+                || block instanceof PitcherCropBlock
+                || block instanceof CocoaBlock;
+    }
+
     /** Handles a crop or sapling at one of its ordinary random-tick opportunities. */
     public void tick(ServerLevel level, BlockPos pos, BlockState state, RandomSource random) {
         long key = pos.asLong();
@@ -72,7 +88,9 @@ public final class GrowthTimers extends SavedData {
         }
 
         int age = sapling ? state.getValue(SaplingBlock.STAGE) : state.getValue(ageProperty);
-        int maxAge = sapling ? 2 : ageProperty.getPossibleValues().stream().mapToInt(Integer::intValue).max().orElse(age);
+        int maxAge = sapling
+                ? 2
+                : ageProperty.getPossibleValues().stream().mapToInt(Integer::intValue).max().orElse(age);
         if (age >= maxAge) {
             timers.remove(key);
             return;
@@ -145,9 +163,8 @@ public final class GrowthTimers extends SavedData {
 
     private static boolean canGrowNow(ServerLevel level, BlockPos pos, BlockState state) {
         return state.canSurvive(level, pos)
-                && (state.getBlock() instanceof SaplingBlock
-                    ? level.getMaxLocalRawBrightness(pos.above()) >= 9
-                    : true);
+                && (!(state.getBlock() instanceof SaplingBlock)
+                    || level.getMaxLocalRawBrightness(pos.above()) >= 9);
     }
 
     private static boolean hasIdealConditions(ServerLevel level, BlockPos pos, BlockState state) {
