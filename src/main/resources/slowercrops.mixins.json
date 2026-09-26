@@ -4,6 +4,7 @@
   "package": "org.ptr47.slowercrops.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
+    "ServerLevelMixin"
   ],
   "client": [
   ],
